@@ -13,7 +13,11 @@
 
 #define CMD_QUIT     0
 #define CMD_CALCULATE 1
-#define MAX_DIM      100 // Dimensão máxima da matriz
+#define MAX_DIM      100
+
+#define MODO_ALEATORIO 1
+#define MODO_MANUAL    2
+#define MODO_PADRAO    3
 
 // Estrutura para retornar o resultado de um processo filho via pipe
 typedef struct {
@@ -28,7 +32,7 @@ void erro(const char *msg) {
     exit(EXIT_FAILURE);
 }
 
-//Função executada por cada processo filho para calcular um único elemento C[i][j].
+// Função executada por cada processo filho para calcular um único elemento C[i][j]
 void calculaElemento(int n, int A[MAX_DIM][MAX_DIM], int B[MAX_DIM][MAX_DIM], int i, int j, int pipe_fd[2]) {
     close(pipe_fd[0]); // O filho não lê do pipe, apenas escreve
 
@@ -47,7 +51,7 @@ void calculaElemento(int n, int A[MAX_DIM][MAX_DIM], int B[MAX_DIM][MAX_DIM], in
     exit(EXIT_SUCCESS);
 }
 
-//Função principal para gerenciar a comunicação com um cliente conectado.
+// Função principal para gerenciar a comunicação com um cliente conectado
 void atenderCliente(int socket_cliente, struct sockaddr_in cli_addr) {
     char client_ip[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &cli_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
@@ -79,18 +83,37 @@ void atenderCliente(int socket_cliente, struct sockaddr_in cli_addr) {
                 printf("[LOG] Cliente %s:%d solicitou encerramento.\n", client_ip, client_port);
                 continuar_conexao = false;
             } else if (comando == CMD_CALCULATE) {
+                int modo;
+                read(socket_cliente, &modo, sizeof(int));
+
                 int n;
                 read(socket_cliente, &n, sizeof(int));
-                printf("[LOG] Cliente %s:%d solicitou cálculo de matriz %dx%d.\n", client_ip, client_port, n, n);
 
                 int A[MAX_DIM][MAX_DIM], B[MAX_DIM][MAX_DIM], C[MAX_DIM][MAX_DIM];
 
-                // Gera matrizes A e B com valores aleatórios
-                srand(time(NULL) ^ getpid());
-                for (int i = 0; i < n; i++) {
-                    for (int j = 0; j < n; j++) {
-                        A[i][j] = rand() % 9 + 1;
-                        B[i][j] = rand() % 9 + 1;
+                if (modo == MODO_ALEATORIO) {
+                    printf("[LOG] Cliente %s:%d - Modo ALEATÓRIO - Matriz %dx%d\n", client_ip, client_port, n, n);
+                    // Gera matrizes A e B com valores aleatórios
+                    srand(time(NULL) ^ getpid());
+                    for (int i = 0; i < n; i++) {
+                        for (int j = 0; j < n; j++) {
+                            A[i][j] = rand() % 9 + 1;
+                            B[i][j] = rand() % 9 + 1;
+                        }
+                    }
+                } else if (modo == MODO_MANUAL) {
+                    printf("[LOG] Cliente %s:%d - Modo MANUAL - Matriz %dx%d\n", client_ip, client_port, n, n);
+                    // Recebe as matrizes A e B do cliente
+                    read(socket_cliente, A, sizeof(int) * n * n);
+                    read(socket_cliente, B, sizeof(int) * n * n);
+                } else if (modo == MODO_PADRAO) {
+                    printf("[LOG] Cliente %s:%d - Modo PADRÃO - Matriz 10x10 (valor 2)\n", client_ip, client_port);
+                    // Matrizes padrão: 10x10 com todos elementos = 2
+                    for (int i = 0; i < n; i++) {
+                        for (int j = 0; j < n; j++) {
+                            A[i][j] = 2;
+                            B[i][j] = 2;
+                        }
                     }
                 }
 

@@ -37,8 +37,6 @@ C[i][j] = Σ(k=0 até n-1) A[i][k] * B[k][j]
 
 ### 1. Compilação
 ```bash
-# Compila ambos os programas
-make
 
 # Ou compile manualmente:
 gcc servidor.c -o servidor
