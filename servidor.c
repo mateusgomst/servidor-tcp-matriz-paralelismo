@@ -21,10 +21,9 @@
 
 // Estrutura para retornar o resultado de um processo filho via pipe
 typedef struct {
-    int i;
-    int j;
-    int valor;
-} ResultadoElemento;
+    int linha;
+    int valores[MAX_DIM];
+} ResultadoLinha;
 
 // Função para reportar erros e terminar o programa
 void erro(const char *msg) {
@@ -32,21 +31,23 @@ void erro(const char *msg) {
     exit(EXIT_FAILURE);
 }
 
-// Função executada por cada processo filho para calcular um único elemento C[i][j]
-void calculaElemento(int n, int A[MAX_DIM][MAX_DIM], int B[MAX_DIM][MAX_DIM], int i, int j, int pipe_fd[2]) {
+// Função executada por cada processo filho para calcular uma linha inteira C[i]
+void calculaLinha(int n, int A[MAX_DIM][MAX_DIM], int B[MAX_DIM][MAX_DIM], int i, int pipe_fd[2]) {
     close(pipe_fd[0]); // O filho não lê do pipe, apenas escreve
 
-    ResultadoElemento res;
-    res.i = i;
-    res.j = j;
-    res.valor = 0;
+    ResultadoLinha res;
+    res.linha = i;
 
-    for (int k = 0; k < n; k++) {
-        res.valor += A[i][k] * B[k][j];
+    // Calcula todos os elementos da linha i
+    for (int j = 0; j < n; j++) {
+        res.valores[j] = 0;
+        for (int k = 0; k < n; k++) {
+            res.valores[j] += A[i][k] * B[k][j];
+        }
     }
 
-    // Envia o resultado (i, j, valor) para o processo pai através do pipe
-    write(pipe_fd[1], &res, sizeof(ResultadoElemento));
+    // Envia o resultado (linha e seus valores) para o processo pai através do pipe
+    write(pipe_fd[1], &res, sizeof(ResultadoLinha));
     close(pipe_fd[1]);
     exit(EXIT_SUCCESS);
 }
@@ -57,8 +58,8 @@ void atenderCliente(int socket_cliente, struct sockaddr_in cli_addr) {
     inet_ntop(AF_INET, &cli_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
     int client_port = ntohs(cli_addr.sin_port);
 
-    // Arrays para rastrear processos filhos ativos
-    pid_t processos_ativos[MAX_DIM * MAX_DIM];
+    // Arrays para rastrear processos filhos ativos (agora apenas n processos, um por linha)
+    pid_t processos_ativos[MAX_DIM];
     int num_processos_ativos = 0;
 
     printf("[LOG] Cliente conectado: %s:%d\n", client_ip, client_port);
@@ -117,38 +118,39 @@ void atenderCliente(int socket_cliente, struct sockaddr_in cli_addr) {
                     }
                 }
 
-                pid_t pids[MAX_DIM * MAX_DIM];
-                int pipes[MAX_DIM * MAX_DIM][2];
+                pid_t pids[MAX_DIM];
+                int pipes[MAX_DIM][2];
                 int total_processos_criados = 0;
 
                 // Limpa lista de processos ativos antes de criar novos
                 num_processos_ativos = 0;
 
-                // Cria um processo filho para calcular cada elemento de C
+                // Cria um processo filho para calcular cada LINHA de C (apenas n processos)
                 for (int i = 0; i < n; i++) {
-                    for (int j = 0; j < n; j++) {
-                        if (pipe(pipes[total_processos_criados]) < 0) continue;
+                    if (pipe(pipes[i]) < 0) continue;
 
-                        pid_t pid = fork();
-                        if (pid == 0) { // Processo filho
-                            calculaElemento(n, A, B, i, j, pipes[total_processos_criados]);
-                        } else if (pid > 0) { // Processo pai
-                            pids[total_processos_criados] = pid;
-                            processos_ativos[num_processos_ativos] = pid;
-                            num_processos_ativos++;
-                            close(pipes[total_processos_criados][1]); // Pai não escreve
-                            total_processos_criados++;
-                        }
+                    pid_t pid = fork();
+                    if (pid == 0) { // Processo filho
+                        calculaLinha(n, A, B, i, pipes[i]);
+                    } else if (pid > 0) { // Processo pai
+                        pids[i] = pid;
+                        processos_ativos[num_processos_ativos] = pid;
+                        num_processos_ativos++;
+                        close(pipes[i][1]); // Pai não escreve
+                        total_processos_criados++;
                     }
                 }
                 
-                printf("[LOG] Cliente %s:%d - Criados %d processos para o cálculo.\n", client_ip, client_port, total_processos_criados);
+                printf("[LOG] Cliente %s:%d - Criados %d processos para o cálculo (1 por linha).\n", client_ip, client_port, total_processos_criados);
 
                 // Coleta os resultados dos filhos via pipes
                 for (int i = 0; i < total_processos_criados; i++) {
-                    ResultadoElemento res;
-                    read(pipes[i][0], &res, sizeof(ResultadoElemento));
-                    C[res.i][res.j] = res.valor;
+                    ResultadoLinha res;
+                    read(pipes[i][0], &res, sizeof(ResultadoLinha));
+                    // Copia a linha inteira calculada pelo filho
+                    for (int j = 0; j < n; j++) {
+                        C[res.linha][j] = res.valores[j];
+                    }
                     close(pipes[i][0]);
                     waitpid(pids[i], NULL, 0); // Aguarda o término do filho
                 }
